@@ -111,6 +111,9 @@ function viaText(row) {
       </div>
 
       <div class="grp-body">
+        <div v-if="!g.rows.length" class="group-empty">
+          没有识别到视频引用（模板里既没有 shopify://videos，也没有 .mp4 / .mov 地址）
+        </div>
         <div
           v-for="row in g.rows"
           :key="row.key"

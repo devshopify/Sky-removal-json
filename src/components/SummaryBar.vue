@@ -12,10 +12,18 @@ const cells = computed(() => {
 
   // 待下载的媒体按图片 / 视频分开计数，和表格分组保持一致
   const pending = { image: 0, video: 0, other: 0 };
-  let videoTotal = 0;
+  let videoLocked = 0;
+  let videoManualPending = 0;
   (res.media || []).forEach((m) => {
     const kind = mediaBundleKind(m.kind);
-    if (kind === 'video') videoTotal += 1;
+    const manual = m.bucket === 'manual';
+    if (kind === 'video') {
+      if (manual) {
+        if (m.status === 'download') videoManualPending += 1;
+      } else {
+        videoLocked += 1;
+      }
+    }
     if (m.status === 'download') pending[kind] += 1;
   });
 
@@ -24,9 +32,10 @@ const cells = computed(() => {
 
   return [
     {
-      label: sectionOver ? '模板模块 · 超上限' : '模板模块',
+      label: '版块数',
       value: sectionTotal === null ? '—' : sectionTotal,
       cls: sectionOver ? 'over' : '',
+      alert: sectionOver,
       hint: sectionTotal === null
         ? '没读到入口 JSON 的 sections：入口可能是 section group，或读取失败（控制台有 warn）'
         : `非 Plus 店铺每个 JSON 模板最多 ${SECTION_LIMIT} 个 section`,
@@ -38,7 +47,10 @@ const cells = computed(() => {
     { label: '图片 · 待下载', value: pending.image, cls: 'download' },
     VIDEO_DOWNLOAD_ENABLED
       ? { label: '视频 · 待下载', value: pending.video, cls: 'download' }
-      : { label: '视频 · 仅展示', value: videoTotal, cls: '' },
+      : { label: '视频 · 仅展示', value: videoLocked, cls: '' },
+    ...(!VIDEO_DOWNLOAD_ENABLED && videoManualPending
+      ? [{ label: '视频 · 待下载', value: videoManualPending, cls: 'download' }]
+      : []),
     ...(pending.other ? [{ label: '其他媒体 · 待下载', value: pending.other, cls: 'download' }] : []),
     { label: '未解析引用', value: res.unresolved.length, cls: 'external' },
   ];
@@ -52,9 +64,11 @@ const cells = computed(() => {
       :key="c.label"
       class="sum-cell"
       :class="[c.cls, { zero: !c.value }]"
-      :title="c.hint || ''"
+      :title="c.alert ? '' : (c.hint || '')"
     >
-      <div class="sum-label">{{ c.label }}</div>
+      <div class="sum-label">
+        {{ c.label }}<span v-if="c.alert" class="sum-alert" :title="c.hint">!</span>
+      </div>
       <div class="sum-value">{{ c.value }}</div>
     </div>
   </div>

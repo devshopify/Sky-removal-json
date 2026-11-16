@@ -2,7 +2,6 @@
 import { computed } from 'vue';
 import { ui } from '../composables/useMigration.js';
 import { parseExtraUrls } from '../core/extras.js';
-import { VIDEO_DOWNLOAD_ENABLED } from '../core/features.js';
 
 /** 各站点图片地址速查页，随应用一起发布 */
 const sitesUrl = `${import.meta.env.BASE_URL}sites.html`;
@@ -54,7 +53,7 @@ function onExtraInput(e) {
       @input="onZipInput"
     />
 
-    <details v-if="VIDEO_DOWNLOAD_ENABLED" class="extra-videos">
+    <details class="extra-videos">
       <summary>
         视频地址补充
         <span v-if="extraCount" class="tag-read">{{ extraCount }}</span>

@@ -95,8 +95,8 @@ export const allRows = computed(() => {
     group: mediaGroupOf(m.kind),
     category: m.kind === 'video' ? 'video' : m.kind === 'audio' ? 'audio' : 'image',
     display: m.status === 'download' ? m.name : m.rel || m.name,
-    // 视频下载关闭期间只展示，不参与勾选与打包
-    locked: !VIDEO_DOWNLOAD_ENABLED && m.kind === 'video',
+    // 自动识别出的视频只展示（地址靠文件名拼不出来）；手工填了完整地址的可以下载
+    locked: !VIDEO_DOWNLOAD_ENABLED && m.kind === 'video' && m.bucket !== 'manual',
   }));
   return [...fileRows, ...mediaRows];
 });
@@ -118,18 +118,23 @@ export const groupedRows = computed(() => {
   for (const r of filteredRows.value) {
     (groups[r.group] = groups[r.group] || []).push(r);
   }
-  return GROUP_ORDER.filter((g) => groups[g] && groups[g].length).map((g) => {
-    const list = [...groups[g]].sort(
-      (a, b) => (STATUS_META[a.status]?.rank ?? 9) - (STATUS_META[b.status]?.rank ?? 9) ||
-        String(a.display).localeCompare(String(b.display))
-    );
-    const cnt = { missing: 0, modified: 0, identical: 0, download: 0 };
-    list.forEach((r) => { if (cnt[r.status] !== undefined) cnt[r.status] += 1; });
-    const locked = list.filter((r) => r.locked).length;
-    return {
-      key: g, label: GROUP_LABEL[g], rows: list.slice(0, 300), total: list.length, cnt, locked,
-    };
-  });
+  // 视频分组常驻：一个视频都没识别到时也保留这一栏，方便对照「确实没有」而不是「被漏掉」
+  const keepEmptyVideo = Boolean(analysis.value) && ui.filter === 'all' && !ui.search;
+
+  return GROUP_ORDER
+    .filter((g) => (groups[g] && groups[g].length) || (keepEmptyVideo && g === 'media-video'))
+    .map((g) => {
+      const list = [...(groups[g] || [])].sort(
+        (a, b) => (STATUS_META[a.status]?.rank ?? 9) - (STATUS_META[b.status]?.rank ?? 9) ||
+          String(a.display).localeCompare(String(b.display))
+      );
+      const cnt = { missing: 0, modified: 0, identical: 0, download: 0 };
+      list.forEach((r) => { if (cnt[r.status] !== undefined) cnt[r.status] += 1; });
+      const locked = list.filter((r) => r.locked).length;
+      return {
+        key: g, label: GROUP_LABEL[g], rows: list.slice(0, 300), total: list.length, cnt, locked,
+      };
+    });
 });
 
 export const chosenRows = computed(() => allRows.value.filter((r) => selected.value.has(r.key)));

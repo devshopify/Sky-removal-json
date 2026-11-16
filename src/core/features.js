@@ -1,11 +1,11 @@
 /**
  * 功能开关。
  *
- * 视频下载暂时关闭：CDN 上的视频地址是哈希路径，靠文件名拼不出来，
- * 强行下载只会得到一堆 404。现在改为「只展示清单 + 一键复制名字」，
- * 由人工在 Shopify 后台 Files 里按名字找到后处理。
+ * 自动识别出的视频暂时不下载：CDN 上的视频地址是哈希路径，靠文件名拼不出来，
+ * 强行下载只会得到一堆 404。这类在表格里「仅展示」+ 一键复制名字，
+ * 由人工在后台 Files 里处理；侧栏「视频地址补充」里手填的完整地址仍然可以下载。
  *
- * 等接入 Admin API（scripts/fetch-files.js）后再打开。
+ * 等接入 Admin API（scripts/fetch-files.js）或需要恢复自动下载时，把这里改成 true。
  */
 export const VIDEO_DOWNLOAD_ENABLED = false;
 

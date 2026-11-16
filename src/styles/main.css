@@ -367,13 +367,30 @@ input::placeholder { color: #a9b0bd; font-family: -apple-system, "PingFang SC", 
   border-right: 1px solid var(--border);
 }
 .sum-cell:last-child { border-right: none; }
-.sum-label { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.sum-label { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
 .sum-value { font-size: 19px; font-weight: 680; letter-spacing: -0.4px; line-height: 1.2; }
 .sum-value small { font-size: 11px; font-weight: 500; color: var(--muted); margin-left: 3px; }
 .sum-cell.missing .sum-value { color: var(--danger); }
 .sum-cell.modified .sum-value { color: var(--warn); }
 .sum-cell.over .sum-value { color: var(--warn); }
 .sum-cell.over .sum-label { color: var(--warn); font-weight: 600; }
+
+/* 超出模块上限时，数字后面挂一个感叹号，提示语放在它的 title 上 */
+.sum-alert {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
 .sum-cell.identical .sum-value { color: var(--ok); }
 .sum-cell.download .sum-value { color: var(--brand); }
 .sum-cell.external .sum-value { color: var(--text-2); }
@@ -517,6 +534,12 @@ input::placeholder { color: #a9b0bd; font-family: -apple-system, "PingFang SC", 
 
 /* 仅展示的行：无勾选框，末尾给一个复制名字的按钮 */
 .row.locked { background: #fcfcfd; }
+.group-empty {
+  padding: 11px 14px;
+  font-size: 11.5px;
+  color: var(--muted);
+  background: #fcfcfd;
+}
 .row-lock { color: #c3cad6; text-align: center; font-size: 11px; }
 .row-copy { display: flex; justify-content: flex-end; }
 .btn-copy-name {
