@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { ui, GROUP_ORDER } from '../composables/useMigration.js';
+import { REPORT_ENABLED } from '../core/features.js';
 
 const emit = defineEmits(['export']);
 
@@ -36,7 +37,7 @@ function toggleAll() {
       </div>
     </div>
     <div class="tool-right">
-      <button class="btn-ghost" @click="emit('export')">
+      <button v-if="REPORT_ENABLED" class="btn-ghost" @click="emit('export')">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" /></svg>
         报告
       </button>

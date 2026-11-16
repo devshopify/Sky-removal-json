@@ -1,10 +1,14 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { scanSite } from '../src/core/indexer.js';
 import { createNodeReader } from '../server/node-reader.js';
 import { resolveDependencies } from '../src/core/resolver.js';
 import { compareSites, compareMedia } from '../src/core/compare.js';
-import { buildMediaUrl } from '../src/core/downloader.js';
+import { buildMediaUrl, buildMediaUrls, videoBaseUrl } from '../src/core/downloader.js';
+import { buildZipName, mediaBundleKind } from '../src/core/bundle.js';
+import { parseExtraUrls, mergeManualMedia, kindOf } from '../src/core/extras.js';
+import { countSections, SECTION_LIMIT, parseTemplateJson } from '../src/core/template.js';
 import { classifyString } from '../src/core/parsers/shared.js';
 import { originalName } from '../src/core/downloader.js';
 
@@ -126,6 +130,118 @@ check('中间带下划线不误伤', originalName('size_100x_test.png'), 'size_1
 console.log('\n== 断言：CDN 拼接 ==');
 check('a2-bg.jpg URL', buildMediaUrl(base, 'a2-bg.jpg'), 'https://es.dreametech.com/cdn/shop/files/a2-bg.jpg');
 check('base 无斜杠', buildMediaUrl('https://es.dreametech.com/cdn/shop/files', 'x.png'), 'https://es.dreametech.com/cdn/shop/files/x.png');
+
+console.log('\n== 断言：托管视频走 /videos/ 目录 ==');
+check('视频基址', videoBaseUrl(base), 'https://es.dreametech.com/cdn/shop/videos/');
+check(
+  'c/vp 路径优先走 videos',
+  buildMediaUrls(base, 'c/vp/abc123/abc123.HD-1080p-7.2Mbps-1.mp4')[0],
+  'https://es.dreametech.com/cdn/shop/videos/c/vp/abc123/abc123.HD-1080p-7.2Mbps-1.mp4'
+);
+check(
+  '普通图片只有一个候选',
+  buildMediaUrls(base, 'a2-bg.jpg').length,
+  1
+);
+check(
+  '带目录前缀的视频试三种',
+  buildMediaUrls(base, 'videos/a.mov').join(' | '),
+  [
+    'https://es.dreametech.com/cdn/shop/files/videos/a.mov',
+    'https://es.dreametech.com/cdn/shop/files/a.mov',
+    'https://es.dreametech.com/cdn/shop/videos/a.mov',
+  ].join(' | ')
+);
+
+console.log('\n== 断言：手工补充的视频地址 ==');
+{
+  const list = parseExtraUrls(`
+    https://global.dreametech.com/cdn/shop/videos/c/vp/abc/abc.HD-1080p-7.2Mbps-1.mp4?v=0
+    https://cdn.shopify.com/videos/c/o/v/xyz.mp4
+    https://global.dreametech.com/cdn/shop/videos/c/vp/abc/abc.HD-1080p-7.2Mbps-1.mp4?v=0
+    这不是地址
+  `);
+  check('去重后条数', String(list.length), '2');
+  check('带 ?v= 时取文件名', list[0].name, 'abc.HD-1080p-7.2Mbps-1.mp4');
+  check('保留原始 URL', String(list[0].url.endsWith('?v=0')), 'true');
+  check('非 http 全部忽略', String(list.every((x) => /^https?:/.test(x.url))), 'true');
+
+  const merged = mergeManualMedia(
+    [{ name: 'a.mov' }],
+    'https://x.com/videos/c/vp/1/1.mp4 https://x.com/videos/c/vp/2/2.mp4'
+  );
+  check('并入媒体条数', String(merged.length), '2');
+  check('并入后状态', merged[0].status, 'download');
+  check('并入后类型', merged[0].kind, 'video');
+  check('与已有同名不重复', String(mergeManualMedia([{ name: '1.mp4' }], 'https://x.com/a/1.mp4').length), '0');
+
+  // 整页源码也能直接粘
+  const html = '<video src="https://cdn.shopify.com/videos/c/o/v/abc.mp4" poster="https://x.com/p.jpg"></video>'
+    + '<script>var u = "https://global.x.com/videos/c/vp/1/1.mp4";</script>';
+  const fromHtml = parseExtraUrls(html);
+  check('源码抽取条数', String(fromHtml.length), '3');
+  check('源码里的视频识别', kindOf('https://cdn.shopify.com/videos/c/o/v/abc.mp4'), 'video');
+  check('源码里的图片识别', kindOf('https://x.com/p.jpg'), 'image');
+  check('页面地址被忽略', String(parseExtraUrls('https://global.dreametech.com/products/t16-pro-heat').length), '0');
+  check(
+    '图片并入后归到图片',
+    mergeManualMedia([], 'https://x.com/a.png')[0].kind,
+    'image'
+  );
+
+  const named = parseExtraUrls('t16ph_v-mb-media3-video1.mov | https://x.com/videos/c/vp/1/abcd.mp4');
+  check('显式文件名生效', named[0].name, 't16ph_v-mb-media3-video1.mov');
+  check('显式命名不影响地址', named[0].url, 'https://x.com/videos/c/vp/1/abcd.mp4');
+  check(
+    '没写名字时用地址末段',
+    parseExtraUrls('https://x.com/videos/c/vp/1/abcd.mp4')[0].name,
+    'abcd.mp4'
+  );
+}
+
+console.log('\n== 断言：模板 section 统计 ==');
+{
+  const entryJson = JSON.parse(
+    fs.readFileSync(path.join(A_DIR, 'templates/product.a2-3000.json'), 'utf8')
+  );
+  check('示例入口的 section 数', String(countSections(entryJson)), '2');
+  check('没有 sections 字段', String(countSections({})), '0');
+  check('null 输入', String(countSections(null)), '0');
+  check('空数组算 0', String(countSections({ sections: [] })), '0');
+  check('旧版数组格式', String(countSections({ sections: [{}, {}, {}] })), '3');
+  check('整个文件是数组', String(countSections([{}, {}])), '2');
+  check('非 Plus 上限常量', String(SECTION_LIMIT), '25');
+
+  // 带注释 / 尾逗号的模板（编辑器导出常见写法）
+  const commented = `/*
+ * auto generated, do not edit
+ */
+{
+  // 主模块
+  "sections": {
+    "main": { "type": "hero", "settings": { "url": "https://x.com/a.png" } },
+    "specs": { "type": "specs" },
+  }
+}`;
+  const parsed = parseTemplateJson(commented);
+  check('带注释的模板能解析', String(countSections(parsed)), '2');
+  check('字符串里的 // 不受影响', parsed.sections.main.settings.url, 'https://x.com/a.png');
+  check('尾随逗号被容忍', typeof parsed.sections.specs, 'object');
+  check('严格 JSON 仍走原路径', String(countSections(parseTemplateJson('{"sections":{"a":{}}}'))), '1');
+}
+
+console.log('\n== 断言：图片 / 视频分开打包 ==');
+check('图片 kind', mediaBundleKind('image'), 'image');
+check('视频 kind', mediaBundleKind('video'), 'video');
+check('音频归入其他', mediaBundleKind('audio'), 'other');
+check('未知 kind 归入其他', mediaBundleKind(undefined), 'other');
+check('自定义名 + 图片包', buildZipName('image', 2, 'myzip', 'slug', 1), 'myzip-图片.zip');
+check('自定义名 + 视频包', buildZipName('video', 2, 'myzip', 'slug', 1), 'myzip-视频.zip');
+check('自定义名 + 主题包', buildZipName('theme', 3, 'myzip', 'slug', 1), 'myzip-主题文件.zip');
+check('只有图片包也加后缀', buildZipName('image', 1, 'myzip', 'slug', 1), 'myzip-图片.zip');
+check('单独主题包用原名', buildZipName('theme', 1, 'myzip', 'slug', 1), 'myzip.zip');
+check('无自定义名', buildZipName('video', 2, '', 'slug', 1), '视频-slug-1.zip');
+check('媒体类型区分', media.map((m) => m.kind).sort().join(','), 'image,video');
 
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILED`);
 process.exit(fail === 0 ? 0 : 1);

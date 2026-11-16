@@ -3,6 +3,10 @@ import { scanSite } from '../core/indexer.js';
 import { resolveDependencies } from '../core/resolver.js';
 import { compareSites, compareMedia } from '../core/compare.js';
 import { downloadMedia } from '../core/downloader.js';
+import { buildZipName, mediaBundleKind } from '../core/bundle.js';
+import { mergeManualMedia } from '../core/extras.js';
+import { VIDEO_DOWNLOAD_ENABLED } from '../core/features.js';
+import { countSections, parseTemplateJson } from '../core/template.js';
 import {
   createFileListReader,
   createFsaReader,
@@ -12,16 +16,26 @@ import {
 } from '../core/fsa-reader.js';
 import { unzipSync, zip } from 'fflate';
 
-export const GROUP_ORDER = ['liquid', 'json', 'style', 'script', 'media', 'other'];
+export const GROUP_ORDER = ['liquid', 'json', 'style', 'script', 'media-image', 'media-video', 'media-other', 'other'];
 export const GROUP_LABEL = {
   liquid: 'Liquid 模板',
   json: 'JSON / Template',
   style: '样式',
   script: '脚本',
-  media: '图片 / 视频',
+  'media-image': '图片',
+  'media-video': '视频',
+  'media-other': '其他媒体',
   other: '其他',
 };
-export const ICON = { liquid: 'L', json: 'J', style: 'C', script: 'S', media: 'M', other: '?' };
+export const ICON = {
+  liquid: 'L', json: 'J', style: 'C', script: 'S',
+  'media-image': 'I', 'media-video': 'V', 'media-other': 'M', other: '?',
+};
+
+/** 媒体分组 key：图片 / 视频分开显示，音视频之外归到「其他媒体」 */
+function mediaGroupOf(kind) {
+  return `media-${mediaBundleKind(kind)}`;
+}
 export const STATUS_META = {
   missing: { label: '缺失', cls: 'missing', rank: 0 },
   download: { label: '待下载', cls: 'download', rank: 1 },
@@ -38,6 +52,7 @@ export const ui = reactive({
   entry: null,
   mediaBase: localStorage.getItem('migrator.media') || '',
   zipName: localStorage.getItem('migrator.zipName') || '',
+  extraVideos: localStorage.getItem('migrator.extraVideos') || '',
   filter: 'all',
   search: '',
   collapsed: [],
@@ -69,16 +84,19 @@ export const allRows = computed(() => {
     ...it,
     rowType: 'file',
     key: it.rel,
-    group: it.group,
+    // 仓库里的图片 / 视频文件也归到对应分组，和 CDN 媒体保持一致
+    group: it.group === 'media' ? mediaGroupOf(it.category) : it.group,
     display: it.rel,
   }));
   const mediaRows = (res.media || []).map((m) => ({
     ...m,
     rowType: 'media',
     key: `media::${m.name}`,
-    group: 'media',
+    group: mediaGroupOf(m.kind),
     category: m.kind === 'video' ? 'video' : m.kind === 'audio' ? 'audio' : 'image',
     display: m.status === 'download' ? m.name : m.rel || m.name,
+    // 视频下载关闭期间只展示，不参与勾选与打包
+    locked: !VIDEO_DOWNLOAD_ENABLED && m.kind === 'video',
   }));
   return [...fileRows, ...mediaRows];
 });
@@ -107,7 +125,10 @@ export const groupedRows = computed(() => {
     );
     const cnt = { missing: 0, modified: 0, identical: 0, download: 0 };
     list.forEach((r) => { if (cnt[r.status] !== undefined) cnt[r.status] += 1; });
-    return { key: g, label: GROUP_LABEL[g], rows: list.slice(0, 300), total: list.length, cnt };
+    const locked = list.filter((r) => r.locked).length;
+    return {
+      key: g, label: GROUP_LABEL[g], rows: list.slice(0, 300), total: list.length, cnt, locked,
+    };
   });
 });
 
@@ -116,7 +137,7 @@ export const chosenRows = computed(() => allRows.value.filter((r) => selected.va
 export const actionStats = computed(() => {
   const chosen = chosenRows.value;
   const copy = chosen.filter((r) => r.rowType === 'file' || r.status !== 'download');
-  const dl = chosen.filter((r) => r.rowType === 'media' && r.status === 'download');
+  const dl = chosen.filter((r) => r.rowType === 'media' && r.status === 'download' && !r.locked);
   return {
     copy,
     dl,
@@ -246,17 +267,34 @@ export async function runAnalyze() {
     ui.busyText = '正在对比目标站点…';
     const cmp = await compareSites(siteA.value, siteB.value, deps);
     const media = await compareMedia(siteA.value, siteB.value, deps.media);
-    const mediaCounts = media.reduce(
+
+    /* 手工补充的地址：主题里只留了文件名、CDN 上又是哈希路径的视频，靠这里兜底 */
+    const manual = mergeManualMedia(media, ui.extraVideos);
+    const allMedia = [...media, ...manual];
+    const mediaCounts = allMedia.reduce(
       (acc, m) => { acc[m.status] = (acc[m.status] || 0) + 1; return acc; },
       { download: 0, missing: 0, modified: 0, identical: 0 }
     );
+
+    /* 入口模板里的 section 数量：非 Plus 店铺每个 JSON 模板最多 25 个 */
+    let sectionCount = null;
+    try {
+      const text = siteA.value.readText
+        ? await siteA.value.readText(deps.entry)
+        : new TextDecoder().decode(await siteA.value.readBytes(deps.entry));
+      // 有的模板开头带 /* */ 注释或尾随逗号，parseTemplateJson 会先清理再解析
+      sectionCount = countSections(parseTemplateJson(text));
+    } catch (e) {
+      console.warn('[sections] 读取入口模板失败：', deps.entry, e);
+    }
 
     analysis.value = {
       entry: deps.entry,
       items: cmp.items,
       counts: cmp.counts,
-      media,
+      media: allMedia,
       mediaCounts,
+      sections: sectionCount,
       externals: deps.externals,
       unresolved: deps.unresolved,
       dynamics: deps.dynamics,
@@ -270,8 +308,10 @@ export async function runAnalyze() {
 
     const sel = new Set();
     cmp.items.filter((i) => i.status === 'missing').forEach((i) => sel.add(i.rel));
-    media
-      .filter((m) => m.status === 'download' || m.status === 'missing')
+    allMedia
+      .filter((m) => (m.status === 'download' || m.status === 'missing'))
+      // 视频下载关闭时只展示，不默认勾选
+      .filter((m) => VIDEO_DOWNLOAD_ENABLED || m.kind !== 'video')
       .forEach((m) => sel.add(`media::${m.name}`));
     selected.value = sel;
   } catch (e) {
@@ -328,17 +368,11 @@ function safeName(name) {
   return String(name).replace(/[\\/:*?"<>|]/g, '_');
 }
 
-/** 生成 zip 文件名；用户填了就用他的，否则按 类型-入口-时间戳 */
-function buildZipName(kind, kindCount, custom, entrySlug, stamp) {
-  if (!custom) return `${kind}-${entrySlug}-${stamp}.zip`;
-  // 只有一个包时直接用自定义名，两个包时按类型区分，避免同名覆盖
-  return kindCount === 1 ? `${custom}.zip` : `${custom}-${kind}.zip`;
-}
-
 export async function execute() {
   const { copy, dl } = actionStats.value;
   if (!copy.length && !dl.length) return;
-  if (dl.length && !ui.mediaBase.trim()) {
+  // 手工补充的地址是完整 URL，不依赖基址
+  if (dl.some((r) => !r.url) && !ui.mediaBase.trim()) {
     toast('选中的媒体需要下载，请先填写图片来源地址', 'error');
     return;
   }
@@ -380,11 +414,12 @@ export async function execute() {
       }
     }
 
-    /* 2. 媒体下载：不管目标目录能不能写，都单独打一个 zip 给浏览器 */
+    /* 2. 媒体下载：图片 / 视频分开打包，各出一个 zip */
     if (dl.length) {
       ui.busyText = '正在下载图片 / 视频…';
+      const kindByName = new Map(dl.map((r) => [r.name, r.kind]));
       const res = await downloadMedia({
-        items: dl.map((r) => ({ name: r.name })),
+        items: dl.map((r) => ({ name: r.name, url: r.url })),
         baseUrl: ui.mediaBase.trim(),
         onProgress: (p) => { ui.busyText = `下载 ${p.done}/${p.total}：${p.name}`; },
       });
@@ -406,13 +441,17 @@ export async function execute() {
 
       const ok = res.results.filter((r) => r.ok);
       if (ok.length) {
-        const mediaBundle = {};
+        const bundles = new Map();
         // Files 是扁平命名空间，保持原文件名，解压后直接拖进后台上传
-        ok.forEach((r) => { mediaBundle[safeName(r.name)] = r.bytes; });
-        zipQueue.push({
-          kind: 'media',
-          count: ok.length,
-          files: mediaBundle,
+        ok.forEach((r) => {
+          const kind = mediaBundleKind(kindByName.get(r.name));
+          if (!bundles.has(kind)) bundles.set(kind, {});
+          bundles.get(kind)[safeName(r.name)] = r.bytes;
+        });
+        ['image', 'video', 'other'].forEach((kind) => {
+          const files = bundles.get(kind);
+          if (!files) return;
+          zipQueue.push({ kind, count: Object.keys(files).length, files });
         });
       }
     }

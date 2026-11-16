@@ -30,6 +30,11 @@ Thumbs.db
 .workbuddy/
 
 # 部署用环境文件（保留，勿删）
+.env.ghpages
+
+# 本地 Admin API 凭据，含 token，绝不提交
+.env.videos
+.shopify-token.json
 
 # 截图/临时产物
 /*.png

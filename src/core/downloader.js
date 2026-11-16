@@ -18,6 +18,52 @@ export function buildMediaUrl(baseUrl, name) {
 }
 
 /**
+ * Shopify 托管视频和 Files 不在同一个目录：
+ *   Files  -> https://<shop>/cdn/shop/files/xxx
+ *   视频   -> https://<shop>/cdn/shop/videos/c/vp/xxx/xxx.HD-1080p-....mp4
+ * 用户填的基址总是 /cdn/shop/files/，所以视频要换一段路径再试。
+ */
+export function videoBaseUrl(baseUrl) {
+  const b = String(baseUrl || '').trim();
+  if (!b) return '';
+  return /\/files\/?$/.test(b) ? b.replace(/\/files\/?$/, '/videos/') : b;
+}
+
+/**
+ * 一个名字可能对应多个地址，按命中率排序。
+ * 调用方依次尝试，第一个成功即停，所以多给的候选只在失败时才多花一次请求。
+ */
+export function buildMediaUrls(baseUrl, name) {
+  const out = [];
+  const add = (u) => { if (u && !out.includes(u)) out.push(u); };
+
+  const clean = String(name || '').split('?')[0].split('#')[0].replace(/^\/+/, '');
+  if (!clean) return out;
+
+  // Shopify 托管视频的固定路径前缀 c/vp/<hash>/
+  if (/^c\/vp\//i.test(clean)) {
+    add(buildMediaUrl(videoBaseUrl(baseUrl), clean));
+    add(buildMediaUrl(baseUrl, clean));
+    return out;
+  }
+
+  add(buildMediaUrl(baseUrl, clean));
+
+  const last = clean.split('/').pop();
+  const hasDir = Boolean(last) && last !== clean;
+
+  // 名字自带目录前缀（Files 里的文件夹），再去掉前缀试一次
+  if (hasDir) add(buildMediaUrl(baseUrl, last));
+
+  // 视频再试一次托管视频目录；带目录前缀时用去掉前缀的文件名，别拼成 /videos/videos/
+  if (/\.(mp4|mov|webm|m4v|ogv)$/i.test(clean)) {
+    add(buildMediaUrl(videoBaseUrl(baseUrl), hasDir ? last : clean));
+  }
+
+  return out;
+}
+
+/**
  * Shopify CDN 的尺寸 / 裁剪后缀，去掉后就是原图。
  * 形如 xxx_1600x.png、xxx_1600x900.png、xxx_x900.png、xxx_crop_center.png、xxx_grande.png、xxx@2x.png
  */
@@ -83,15 +129,26 @@ export async function downloadMedia({ items, baseUrl, concurrency = 5, timeout =
       if (orig && orig !== it.name) candidates.push(orig);
       candidates.push(it.name);
 
-      let last = { ok: false, reason: '未配置下载地址' };
-      for (const candidate of candidates) {
-        const url = buildMediaUrl(baseUrl, candidate);
-        if (!url) break;
+      // 每个候选名可能对应多个地址（Files / 托管视频 / 去掉目录前缀）
+      const targets = [];
+      if (it.url) {
+        // 手工补充的地址已经是完整 URL，不再拼接
+        targets.push({ candidate: it.name, url: it.url });
+      } else {
+        for (const candidate of candidates) {
+          for (const url of buildMediaUrls(baseUrl, candidate)) {
+            targets.push({ candidate, url });
+          }
+        }
+      }
+
+      let last = { ok: false, reason: targets.length ? '下载失败' : '未配置下载地址' };
+      for (const t of targets) {
         // eslint-disable-next-line no-await-in-loop
-        const r = await fetchOne(url, timeout);
+        const r = await fetchOne(t.url, timeout);
         last = r;
         if (r.ok) {
-          results[idx] = { name: it.name, resolvedName: candidate, ...r };
+          results[idx] = { name: it.name, resolvedName: t.candidate, ...r };
           break;
         }
       }

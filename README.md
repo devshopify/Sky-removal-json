@@ -71,9 +71,17 @@ npm run preview    # 预览构建结果
 ## 执行后拿到什么
 
 - **B 站目录已授权写入**：文件直接写进去，并自动重新扫描 B 站。
-- **拖的是 zip / 未授权写入**：生成 `migration-<模板名>-<时间戳>.zip`，解压覆盖到 B 站主题根即可。
-  下载的图片放在包内 `_downloads/`，需要你上传到 B 站后台 **Files**，保持同名，
+- **拖的是 zip / 未授权写入**：生成 `主题文件-<模板名>-<时间戳>.zip`，解压覆盖到 B 站主题根即可。
+- **媒体单独打包**：图片和视频分开成两个 zip，解压后把文件上传到 B 站后台 **Files**，保持同名，
   JSON 里的 `shopify://shop_images/xxx.jpg` 就会直接生效。
+
+导出 ZIP 名称填了自定义值时，会按包的类型追加后缀，方便区分该传哪一批：
+
+| 包 | 文件名 |
+| --- | --- |
+| 图片 | `<自定义名>-图片.zip` |
+| 视频 | `<自定义名>-视频.zip` |
+| 主题文件 | 只有这一个包时用 `<自定义名>.zip`，与其它包同时存在时用 `<自定义名>-主题文件.zip` |
 
 ## 浏览器要求
 
@@ -100,6 +108,68 @@ npm run deploy:gh
 它做三件事：以 `.env.ghpages` 里的 `VITE_BASE`（当前为 `/Sky-removal-json/`）为 base 构建 → 写入 `.nojekyll` → 强制推送到 `gh-pages` 分支。约 30~60 秒后生效。
 
 改仓库地址的话，设环境变量 `GH_PAGES_REPO` 即可；改子路径改 `.env.ghpages` 里的 `VITE_BASE`。
+
+## 批量下载后台 Files（视频）
+
+网页版是纯前端，拿不到后台登录态；而 `{{ 'videos/xxx.mov' | file_url }}` 这类引用
+对应的真实地址是 `cdn.shopify.com/videos/c/vp/<hash>/…`，靠文件名拼不出来。
+这时用本地脚本走 Admin API，把 Files 里每个文件的真实地址取回来，按后台原名下载。
+
+1. Shopify 后台 → 设置 → 应用 → **在 Dev Dashboard 中构建应用**（2026-01 之后新建应用只能走这里）
+2. Dev Dashboard → **Create app** → 建一个 version：App URL 随便填（如 `http://localhost`），
+   权限只勾 `read_files` → **Release**
+3. 在该 app 里 **Install app**，选择要读的店铺（同一组织下的店可复选）
+4. app → Settings 复制 **Client ID** 与 **Client secret**
+5. 复制 `.env.videos.example` 为 `.env.videos`，填进去（该文件已 gitignore）
+
+**注意两点：**
+
+- 脚本里的店铺要用 **myshopify 子域名**（后台地址栏 `admin.shopify.com/store/<handle>` 的 handle），
+  不是 `global.dreametech.com` 这种自定义域名 —— Admin API 不认自定义域名。
+- 新应用没有静态 token，脚本每次运行时用 Client ID/Secret 现换一个 24 小时有效的 token，
+  不需要你手动续。一份凭据可以跑所有已安装该应用的店铺。
+
+```
+SHOPIFY_CLIENT_ID=xxx
+SHOPIFY_CLIENT_SECRET=shpss_xxx
+SHOPIFY_SHOPS=dreame-global,dreame-de
+```
+
+```bash
+npm run files -- --dry                            # 只列 name → url，先确认能读通
+npm run files -- --type video --zip               # 下载全部视频并打包
+npm run files -- --type video --names list.txt    # 只下名单里的名字
+```
+
+输出在 `data/downloads/`，文件名与后台一致；同时生成 `names-and-urls.txt`，
+可以整段粘进网页版的「视频地址补充」，让它和主题文件一起打进 `-视频.zip`。
+
+> **视频下载目前是关闭状态。** `src/core/features.js` 里的 `VIDEO_DOWNLOAD_ENABLED = false`
+> 时，网页版只展示视频清单（含「仅展示」标记和复制文件名按钮），「视频地址补充」输入框隐藏。
+> 需要恢复把常量改成 `true` 即可，配套逻辑都还在。
+
+### app 和店铺不在同一个组织时（第三方开发）
+
+client credentials 要求 app 与店铺同属一个组织。如果你只是给别家店做开发，
+用授权码流程：由店铺管理员授权一次，拿到的是 offline token，不会过期。
+
+1. Dev Dashboard 的 app 里，把 **Allowed redirection URLs** 填成 `http://localhost`
+2. 生成授权链接：
+
+   ```bash
+   npm run files -- --authorize
+   ```
+
+3. 把链接发给店铺管理员（或自己用有「批准应用」权限的账号）打开并授权
+4. 授权后浏览器跳到 `http://localhost/?code=xxx`，页面打不开是正常的；
+   复制地址栏里 `code=` 后面那段
+5. 换 token 并缓存（存在 `.shopify-token.json`，已 gitignore，长期有效）：
+
+   ```bash
+   npm run files -- --code <粘贴授权码>
+   ```
+
+之后直接 `npm run files -- --type video --zip` 即可，脚本会优先用缓存 token。
 
 ## 开发
 

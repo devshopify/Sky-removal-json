@@ -19,7 +19,8 @@ function humanSize(bytes) {
 
 function onExecute() {
   const { copy, dl } = actionStats.value;
-  if (dl.length && !ui.mediaBase.trim()) {
+  // 手工补充的地址是完整 URL，不依赖基址
+  if (dl.some((r) => !r.url) && !ui.mediaBase.trim()) {
     toast('有媒体需要下载，请先填图片来源地址', 'error');
     return;
   }

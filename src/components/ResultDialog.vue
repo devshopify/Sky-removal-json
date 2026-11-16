@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { ui, siteB, exportSiteZip } from '../composables/useMigration.js';
+import { BUNDLE_LABEL } from '../core/bundle.js';
 
 const res = computed(() => ui.result);
 
@@ -10,8 +11,9 @@ const originalCount = computed(() => {
   if (!d) return 0;
   return d.results.filter((r) => r.ok && r.resolvedName && r.resolvedName !== r.name).length;
 });
-const hasMediaZip = computed(() => Boolean(res.value && res.value.zips.some((z) => z.kind === 'media')));
+const hasMediaZip = computed(() => Boolean(res.value && res.value.zips.some((z) => z.kind !== 'theme')));
 const hasThemeZip = computed(() => Boolean(res.value && res.value.zips.some((z) => z.kind === 'theme')));
+const notFoundCount = computed(() => failedDownloads.value.filter((d) => /404/.test(String(d.reason || ''))).length);
 
 function humanSize(bytes) {
   if (!bytes) return '0 B';
@@ -54,6 +56,11 @@ function close() {
           <div v-for="d in failedDownloads" :key="d.name" class="stat-line">
             <span class="mono-small">{{ d.name }}</span><b class="danger">{{ d.reason }}</b>
           </div>
+          <p v-if="notFoundCount" class="zip-tip">
+            有 {{ notFoundCount }} 个文件按名字拼出的地址不存在（404）。Shopify 托管的视频地址形如
+            <code>/cdn/shop/videos/c/vp/…</code>，由哈希构成、无法从文件名推导；
+            这类需要到页面上右键复制真实地址后手工下载。
+          </p>
         </template>
 
         <template v-if="res.zips.length">
@@ -61,11 +68,11 @@ function close() {
           <div v-for="z in res.zips" :key="z.name" class="zip-row">
             <div class="zip-name" :title="z.name">{{ z.name }}</div>
             <div class="zip-meta">
-              {{ z.kind === 'media' ? '图片 / 视频' : '主题文件' }} · {{ z.count }} 个 · {{ humanSize(z.size) }}
+              {{ BUNDLE_LABEL[z.kind] || z.kind }} · {{ z.count }} 个 · {{ humanSize(z.size) }}
             </div>
           </div>
           <p class="zip-tip">
-            <template v-if="hasMediaZip">media 包解压后把文件传到 B 站后台 <b>Files</b>（保持同名），JSON 里的 shopify:// 引用即可生效。</template>
+            <template v-if="hasMediaZip">图片和视频包分别解压后，把文件传到 B 站后台 <b>Files</b>（保持同名），JSON 里的 shopify:// 引用即可生效。</template>
             <template v-if="originalCount">
               有 {{ originalCount }} 个文件的引用名带尺寸后缀（如 <code>_1600x</code>），下载时已改取原图，
               但<b>文件名保持原样</b>，这样上传到 Files 后引用才能直接对上。

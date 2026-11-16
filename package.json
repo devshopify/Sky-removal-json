@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node test/run.js",
+    "files": "node scripts/fetch-files.js",
     "build:gh": "vite build --mode ghpages",
     "deploy:gh": "node scripts/deploy-gh.js"
   },
