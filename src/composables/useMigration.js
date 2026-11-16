@@ -388,6 +388,7 @@ export async function execute() {
     failed: [],
     downloads: null,
     zips: [],
+    conversions: [],
     savedTo: direct ? 'target' : 'zip',
   };
 
@@ -442,11 +443,12 @@ export async function execute() {
       const ok = res.results.filter((r) => r.ok);
       if (ok.length) {
         const bundles = new Map();
-        // Files 是扁平命名空间，保持原文件名，解压后直接拖进后台上传
+        // Files 是扁平命名空间；文件名按真实内容落盘，避免上传后被 Shopify 改名
         ok.forEach((r) => {
           const kind = mediaBundleKind(kindByName.get(r.name));
           if (!bundles.has(kind)) bundles.set(kind, {});
           bundles.get(kind)[safeName(r.name)] = r.bytes;
+          if (r.converted) report.conversions.push({ name: r.name, to: r.convertTarget });
         });
         ['image', 'video', 'other'].forEach((kind) => {
           const files = bundles.get(kind);

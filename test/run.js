@@ -9,6 +9,7 @@ import { buildMediaUrl, buildMediaUrls, videoBaseUrl } from '../src/core/downloa
 import { buildZipName, mediaBundleKind } from '../src/core/bundle.js';
 import { parseExtraUrls, mergeManualMedia, kindOf } from '../src/core/extras.js';
 import { countSections, SECTION_LIMIT, parseTemplateJson } from '../src/core/template.js';
+import { sniffImageExt, conversionTarget, mimeOfExt } from '../src/core/media-format.js';
 import { classifyString } from '../src/core/parsers/shared.js';
 import { originalName } from '../src/core/downloader.js';
 
@@ -230,15 +231,38 @@ console.log('\n== 断言：模板 section 统计 ==');
   check('严格 JSON 仍走原路径', String(countSections(parseTemplateJson('{"sections":{"a":{}}}'))), '1');
 }
 
+console.log('\n== 断言：按 JSON 扩展名转码的判断 ==');
+{
+  const pad = (arr) => new Uint8Array([...arr, ...new Array(Math.max(0, 12 - arr.length)).fill(0)]);
+  const png = pad([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const jpg = pad([0xff, 0xd8, 0xff, 0xe1]);
+  const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+  const mp4 = new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32]);
+
+  check('PNG 头', sniffImageExt(png), '.png');
+  check('JPEG 头', sniffImageExt(jpg), '.jpg');
+  check('WebP 头', sniffImageExt(webp), '.webp');
+  check('视频头不是图片', String(sniffImageExt(mp4)), 'null');
+
+  check('webp 名 + PNG 内容 → 转码', conversionTarget('a.webp', png), '.webp');
+  check('webp 名 + JPEG 内容 → 转码', conversionTarget('a.webp', jpg), '.webp');
+  check('webp 名 + WebP 内容 → 不转', String(conversionTarget('a.webp', webp)), 'null');
+  check('png 名 + PNG 内容 → 不转', String(conversionTarget('a.png', png)), 'null');
+  check('png 名 + JPEG 内容 → 转 png', conversionTarget('a.png', jpg), '.png');
+  check('视频不参与转码', String(conversionTarget('a.mp4', mp4)), 'null');
+  check('gif 不参与转码', String(conversionTarget('a.gif', png)), 'null');
+  check('webp 的 MIME', mimeOfExt('.webp'), 'image/webp');
+}
+
 console.log('\n== 断言：图片 / 视频分开打包 ==');
 check('图片 kind', mediaBundleKind('image'), 'image');
 check('视频 kind', mediaBundleKind('video'), 'video');
 check('音频归入其他', mediaBundleKind('audio'), 'other');
 check('未知 kind 归入其他', mediaBundleKind(undefined), 'other');
-check('自定义名 + 图片包', buildZipName('image', 2, 'myzip', 'slug', 1), 'myzip-图片.zip');
+check('自定义名 + 图片包（不加后缀）', buildZipName('image', 2, 'myzip', 'slug', 1), 'myzip.zip');
 check('自定义名 + 视频包', buildZipName('video', 2, 'myzip', 'slug', 1), 'myzip-视频.zip');
 check('自定义名 + 主题包', buildZipName('theme', 3, 'myzip', 'slug', 1), 'myzip-主题文件.zip');
-check('只有图片包也加后缀', buildZipName('image', 1, 'myzip', 'slug', 1), 'myzip-图片.zip');
+check('只有图片包也用原名', buildZipName('image', 1, 'myzip', 'slug', 1), 'myzip.zip');
 check('单独主题包用原名', buildZipName('theme', 1, 'myzip', 'slug', 1), 'myzip.zip');
 check('无自定义名', buildZipName('video', 2, '', 'slug', 1), '视频-slug-1.zip');
 check('媒体类型区分', media.map((m) => m.kind).sort().join(','), 'image,video');

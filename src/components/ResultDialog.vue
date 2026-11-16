@@ -14,6 +14,13 @@ const originalCount = computed(() => {
 const hasMediaZip = computed(() => Boolean(res.value && res.value.zips.some((z) => z.kind !== 'theme')));
 const hasThemeZip = computed(() => Boolean(res.value && res.value.zips.some((z) => z.kind === 'theme')));
 const notFoundCount = computed(() => failedDownloads.value.filter((d) => /404/.test(String(d.reason || ''))).length);
+const convTargets = computed(() => {
+  const stat = {};
+  ((res.value && res.value.conversions) || []).forEach((c) => {
+    stat[c.to] = (stat[c.to] || 0) + 1;
+  });
+  return Object.entries(stat);
+});
 
 function humanSize(bytes) {
   if (!bytes) return '0 B';
@@ -60,6 +67,17 @@ function close() {
             有 {{ notFoundCount }} 个文件按名字拼出的地址不存在（404）。Shopify 托管的视频地址形如
             <code>/cdn/shop/videos/c/vp/…</code>，由哈希构成、无法从文件名推导；
             这类需要到页面上右键复制真实地址后手工下载。
+          </p>
+        </template>
+
+        <template v-if="res.conversions && res.conversions.length">
+          <div class="res-section-title">按 JSON 扩展名转码</div>
+          <div v-for="[to, n] in convTargets" :key="to" class="stat-line">
+            <span>转成 {{ to }}</span><b class="ok">{{ n }} 个</b>
+          </div>
+          <p class="zip-tip">
+            这些文件的原始内容是 PNG / JPEG，已按 JSON 里写的扩展名重新编码，
+            保证上传后文件名不变、主题引用能对上。
           </p>
         </template>
 

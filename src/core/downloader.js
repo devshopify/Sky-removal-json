@@ -1,3 +1,6 @@
+import { conversionTarget, mimeOfExt } from './media-format.js';
+import { convertImageBytes } from './image-convert.js';
+
 /**
  * 把 CDN 基地址和文件名拼成完整 URL
  *   base: https://es.dreametech.com/cdn/shop/files/
@@ -148,7 +151,27 @@ export async function downloadMedia({ items, baseUrl, concurrency = 5, timeout =
         const r = await fetchOne(t.url, timeout);
         last = r;
         if (r.ok) {
-          results[idx] = { name: it.name, resolvedName: t.candidate, ...r };
+          // JSON 写的扩展名才是准的：内容不符就当场转码（如 .webp 名 + PNG 内容）
+          const wantExt = conversionTarget(it.name, r.bytes);
+          let bytes = r.bytes;
+          let converted = false;
+          if (wantExt) {
+            // eslint-disable-next-line no-await-in-loop
+            const out = await convertImageBytes(bytes, mimeOfExt(wantExt));
+            if (out) {
+              bytes = out;
+              converted = true;
+            }
+          }
+          results[idx] = {
+            name: it.name,
+            converted,
+            convertTarget: converted ? wantExt : null,
+            resolvedName: t.candidate,
+            ...r,
+            bytes,
+            size: bytes.length,
+          };
           break;
         }
       }

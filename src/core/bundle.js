@@ -23,12 +23,13 @@ export function mediaBundleKind(kind) {
 /**
  * 生成 zip 文件名。
  * 没填自定义名：`类型-入口-时间戳.zip`
- * 填了自定义名：媒体包一律带 `-图片` / `-视频` 后缀，方便分辨该传哪一批；
- * 主题文件只有单独一个包时直接用原名，不额外加后缀
+ * 填了自定义名：图片包直接用这个名字（不加后缀）；其余包加类型后缀，
+ * 避免和图片包同名互相覆盖
  */
 export function buildZipName(kind, bundleCount, custom, entrySlug, stamp) {
   const label = BUNDLE_LABEL[kind] || kind;
   if (!custom) return `${label}-${entrySlug}-${stamp}.zip`;
-  if (kind === 'theme' && bundleCount === 1) return `${custom}.zip`;
+  // 图片包用自定义名原名；主题包单独存在时也用原名
+  if (kind === 'image' || bundleCount === 1) return `${custom}.zip`;
   return `${custom}-${label}.zip`;
 }
