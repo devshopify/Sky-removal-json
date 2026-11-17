@@ -11,6 +11,7 @@ import { parseExtraUrls, mergeManualMedia, kindOf } from '../src/core/extras.js'
 import { countSections, SECTION_LIMIT, parseTemplateJson } from '../src/core/template.js';
 import { sniffImageExt, conversionTarget, mimeOfExt } from '../src/core/media-format.js';
 import { classifyString } from '../src/core/parsers/shared.js';
+import { createMemoryReader } from '../src/core/fsa-reader.js';
 import { originalName } from '../src/core/downloader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -89,11 +90,36 @@ check('assets/hero-banner-mobile.jpg', fileStatus('assets/hero-banner-mobile.jpg
 check('assets/icon-arrow.svg', fileStatus('assets/icon-arrow.svg'), 'identical');
 check('assets/product-video.mp4', fileStatus('assets/product-video.mp4'), 'missing');
 
-console.log('\n== 断言：css/js/子json 不应进入清单 ==');
-check('assets/theme.css 未纳入', fileStatus('assets/theme.css'), 'NOT FOUND');
-check('assets/theme.js 未纳入', fileStatus('assets/theme.js'), 'NOT FOUND');
-check('assets/a2-3000-specs.json 未纳入', fileStatus('assets/a2-3000-specs.json'), 'NOT FOUND');
-check('assets/font-inter.woff2 未纳入', fileStatus('assets/font-inter.woff2'), 'NOT FOUND');
+console.log('\n== 断言：css / js / 子 json 也要进清单 ==');
+// 以前默认排除 code 类依赖，导致 {{ 'x.css' | asset_url }} 引的样式漏搬；现在必须纳入
+check('assets/theme.css 纳入', fileStatus('assets/theme.css'), 'modified');
+check('assets/theme.js 纳入', fileStatus('assets/theme.js'), 'missing');
+check('assets/a2-3000-specs.json 纳入', fileStatus('assets/a2-3000-specs.json'), 'missing');
+check('assets/font-inter.woff2 纳入', fileStatus('assets/font-inter.woff2'), 'modified');
+
+console.log('\n== 断言：asset_url 引用的 css / js 会被收集 ==');
+{
+  const enc = new TextEncoder();
+  const map = new Map([
+    ['assets/section-blog-template.css', enc.encode('.a{}')],
+    ['assets/custom.js', enc.encode('void 0')],
+    ['sections/blog.liquid', enc.encode(
+      "{{ 'section-blog-template.css' | asset_url | stylesheet_tag }}\n"
+      + "{{ 'custom.js' | asset_url | script_tag }}"
+    )],
+    ['sections/main.liquid', enc.encode("{% section 'blog' %}")],
+    ['templates/t.json', enc.encode(JSON.stringify({ sections: { main: { type: 'main' } } }))],
+  ]);
+  const site = await scanSite(createMemoryReader('mem', map));
+  const deps = await resolveDependencies(site, 'templates/t.json');
+  const rels = deps.nodes.map((n) => n.rel);
+  check(
+    'asset_url 的 css 进清单',
+    rels.includes('assets/section-blog-template.css') ? 'yes' : 'no',
+    'yes'
+  );
+  check('asset_url 的 js 进清单', rels.includes('assets/custom.js') ? 'yes' : 'no', 'yes');
+}
 
 console.log('\n== 断言：page_css 展开成 css 文件 ==');
 check('product-s9-pro.css', fileStatus('assets/product-s9-pro.css'), 'missing');

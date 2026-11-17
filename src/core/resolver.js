@@ -189,7 +189,14 @@ function normalizeEntry(site, entryRel) {
  *   media   —— 图片 / 视频，通常走 CDN 下载而不是从仓库复制
  *   code    —— css / js / 字体 / 子 json，默认不纳入
  */
-export const DEFAULT_SCOPE = { liquid: true, media: true, code: false };
+/**
+ * 默认分析范围。
+ *
+ * code 必须是 true：主题里大量 CSS / JS 是通过
+ * `{{ 'section-blog-template.css' | asset_url | stylesheet_tag }}` 引用的，
+ * 只靠 page_css 抓不全，漏掉就会出现“B 站样式丢了”的问题。
+ */
+export const DEFAULT_SCOPE = { liquid: true, media: true, code: true };
 
 function inScope(category, scope) {
   if (category === 'section' || category === 'snippet' || category === 'layout' ||
